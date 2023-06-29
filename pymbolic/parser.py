@@ -45,6 +45,7 @@ _whitespace = intern("whitespace")
 _comma = intern("comma")
 _dot = intern("dot")
 _colon = intern("colon")
+_semicolon = intern("semicolon")
 
 _assign = intern("assign")
 
@@ -183,7 +184,8 @@ class Parser:
             (_whitespace, pytools.lex.RE("[ \n\t]*")),
             (_comma, pytools.lex.RE(",")),
             (_dot, pytools.lex.RE(r"\.")),
-            (_colon, pytools.lex.RE(r"\:"))
+            (_colon, pytools.lex.RE(r"\:")),
+            (_semicolon, pytools.lex.RE(r"\;"))
             ]
 
     _COMP_TABLE = {
@@ -335,18 +337,32 @@ class Parser:
         pstate.advance()
 
         rhs = self.parse_tensorfunctorexpr(pstate, ")")
-        pstate.expect(_closepar)
-        pstate.advance()
-        rhs = primitives.NDAccessSlice(tuple(rhs))
-        return primitives.TensorFunctorDeclaration(tf_name, (lhs,rhs))
+        mapped = None
+
+        try:
+            pstate.expect(_semicolon)
+            pstate.advance()
+            map_str = pstate.next_str_and_advance()
+            assert map_str == "map", "No map clause found"
+            mapped = self.parse_tensorfunctorcall(pstate)
+            pstate.expect(_closepar)
+            pstate.advance()
+        except ValueError as e:
+            print("No map clause found")
+        finally:
+            pstate.expect(_closepar)
+            pstate.advance()
+            rhs = primitives.NDAccessSlice(tuple(rhs))
+
+            return primitives.TensorFunctorDeclaration(tf_name, (lhs,rhs), map=mapped)
 
     def parse_tensorfunctorcall(self, pstate):
         import pymbolic.primitives as primitives
         pstate.expect(_openpar)
         pstate.advance()
-        call_target = pstate.next_str_and_advance()
-        call_args = self.parse_arglist(pstate)[0][0]
-        return primitives.TensorFunctorCall(call_target, call_args)
+        # call_target = pstate.next_str_and_advance()
+        call_args = self.parse_arglist(pstate)[0]
+        return primitives.TensorFunctorCall("map", call_args)
 
 
     def parse_expression(self, pstate, min_precedence=0):

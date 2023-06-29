@@ -1041,9 +1041,12 @@ class NDAccessSlice(Expression):
     mapper_method = 'map_ndaccessslice'
 
 class TensorFunctorDeclaration(_MultiChildExpression):
-    def __init__(self, name, children):
+    def __init__(self, name, children, map=None):
         super().__init__(children)
         self.name = name
+        self._map = None
+        if map:
+            self._map = map
 
     def __getinitargs__(self):
         return (self.name,) + super().__getinitargs__()

@@ -144,6 +144,21 @@ class StringifyMapper(Mapper):
     def map_variable(self, expr, enclosing_prec, *args, **kwargs):
         return expr.name
 
+    def map_tensor_functor(self, expr, enclosing_prec, *args, **kwargs):
+        children_mapped = tuple([self.rec(child, PREC_NONE, *args, **kwargs) for child in expr.children])
+        lhs = children_mapped[0]
+        rhs = children_mapped[1::]
+        if isinstance(rhs, tuple):
+            rhs = rhs[0]
+        rhs = rhs.replace('(', '').replace(')', '')
+        return f"tensor_functor({expr.name}: {lhs} = ({rhs}))"
+
+    def map_tensor_functor_call(self, expr, enclosing_prec, *args, **kwargs):
+        children_mapped = tuple([self.rec(child, PREC_NONE, *args, **kwargs) for child in expr.children])
+        children_mapped_joined = ','.join(children_mapped[1::])
+        return f"tensor_call({expr.name}({children_mapped[0]}, {children_mapped_joined}))"
+
+
     def map_wildcard(self, expr, enclosing_prec, *args, **kwargs):
         return "*"
 

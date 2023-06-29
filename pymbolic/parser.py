@@ -68,6 +68,8 @@ _bitwiseand = intern("bitwiseand")
 _bitwiseor = intern("bitwiseor")
 _bitwisexor = intern("bitwisexor")
 _bitwisenot = intern("bitwisenot")
+_tensorfunctor = intern("tensorfunctor")
+_tensorcall = intern("tensorcall")
 
 _PREC_COMMA = 5  # must be > 1 (1 is used by fortran-to-cl)
 _PREC_SLICE = 10
@@ -175,11 +177,13 @@ class Parser:
             (_closebracket, pytools.lex.RE(r"\]")),
             (_true, pytools.lex.RE(r"True")),
             (_false, pytools.lex.RE(r"False")),
+            (_tensorfunctor, pytools.lex.RE(r"tensor_functor\b")),
+            (_tensorcall, pytools.lex.RE(r"tensor_call\b")),
             (_identifier, pytools.lex.RE(r"[@$a-z_A-Z_][@$a-zA-Z_0-9]*")),
             (_whitespace, pytools.lex.RE("[ \n\t]*")),
             (_comma, pytools.lex.RE(",")),
             (_dot, pytools.lex.RE(r"\.")),
-            (_colon, pytools.lex.RE(r"\:")),
+            (_colon, pytools.lex.RE(r"\:"))
             ]
 
     _COMP_TABLE = {
@@ -211,7 +215,7 @@ class Parser:
             assert pstate.next_str_and_advance() == "False"
             return False
         elif next_tag is _identifier:
-            return primitives.Variable(pstate.next_str_and_advance())
+           return primitives.Variable(pstate.next_str_and_advance())
         elif next_tag is _if:
             from warnings import warn
             warn("Usage of 'if' as an identifier is deprecated due to"
@@ -294,11 +298,56 @@ class Parser:
                 left_exp = FinalizedList(left_exp)
             else:
                 left_exp = FinalizedList([left_exp])
+        elif pstate.is_next(_tensorfunctor):
+                pstate.advance()
+                left_exp = self.parse_tensorfunctordecl(pstate)
+        elif pstate.is_next(_tensorcall):
+            pstate.advance()
+            print("Recognized a tensor functor call")
+            left_exp = self.parse_tensorfunctorcall(pstate)
 
         else:
             left_exp = self.parse_terminal(pstate)
 
         return left_exp
+
+    def parse_tensorfunctorexpr(self, pstate, stop_tok):
+        copy_str = ""
+        current_token = pstate.next_str_and_advance()
+        while current_token != stop_tok:
+            copy_str += current_token
+            current_token = pstate.next_str_and_advance()
+            continue
+        result = self.__call__(copy_str)
+        return result
+
+
+    def parse_tensorfunctordecl(self, pstate):
+        import pymbolic.primitives as primitives
+        pstate.expect(_openpar)
+        pstate.advance()
+        tf_name = pstate.next_str_and_advance()
+        pstate.expect(_colon)
+        pstate.advance()
+
+        lhs = self.parse_tensorfunctorexpr(pstate, "=")
+        pstate.expect(_openpar)
+        pstate.advance()
+
+        rhs = self.parse_tensorfunctorexpr(pstate, ")")
+        pstate.expect(_closepar)
+        pstate.advance()
+        rhs = primitives.NDAccessSlice(rhs)
+        return primitives.TensorFunctorDeclaration(tf_name, (lhs,rhs))
+
+    def parse_tensorfunctorcall(self, pstate):
+        import pymbolic.primitives as primitives
+        pstate.expect(_openpar)
+        pstate.advance()
+        call_target = pstate.next_str_and_advance()
+        call_args = self.parse_arglist(pstate)[0][0]
+        return primitives.TensorFunctorCall(call_target, call_args)
+
 
     def parse_expression(self, pstate, min_precedence=0):
         left_exp = self.parse_prefix(pstate)
@@ -553,7 +602,7 @@ class Parser:
                 if tag is not _whitespace]
         pstate = pytools.lex.LexIterator(lex_result, expr_str)
 
-        result = self. parse_expression(pstate, min_precedence)
+        result = self.parse_expression(pstate, min_precedence)
         if not pstate.is_at_end():
             pstate.raise_parse_error("leftover input after completed parse")
         return result

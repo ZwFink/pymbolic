@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 from sys import intern
 from abc import ABC, abstractmethod
+from typing import Any
 import pymbolic.traits as traits
 
 
@@ -169,11 +170,6 @@ Constants
     :undoc-members:
     :members: mapper_method
 """
-
-
-# The upper bound for the number of nodes printed when repr
-# is called on a pymbolic object.
-SAFE_REPR_LIMIT = 10
 
 
 def disable_subscript_by_getitem():
@@ -497,10 +493,7 @@ class Expression(ABC):
         from pymbolic.mapper.stringifier import PREC_NONE
         return self.make_stringifier()(self, PREC_NONE)
 
-    def _safe_repr(self, limit=None):
-        if limit is None:
-            limit = SAFE_REPR_LIMIT
-
+    def _safe_repr(self, limit=10):
         if limit <= 0:
             return "..."
 
@@ -720,7 +713,6 @@ class Variable(Leaf):
 
     mapper_method = intern("map_variable")
 
-
 class Wildcard(Leaf):
     def __getinitargs__(self):
         return ()
@@ -856,7 +848,9 @@ class CallWithKwargs(AlgebraicLeaf):
     def __getinitargs__(self):
         return (self.function,
                 self.parameters,
-                tuple(sorted(self.kw_parameters.items(), key=lambda item: item[0])))
+                tuple(sorted(
+                    list(self.kw_parameters.items()),
+                    key=lambda item: item[0])))
 
     def __setstate__(self, state):
         # CallWithKwargs must override __setstate__ because during pickling the
@@ -984,6 +978,95 @@ class Sum(_MultiChildExpression):
     __nonzero__ = __bool__
 
     mapper_method = intern("map_sum")
+
+def slice_is_contiguous(slice):
+    return slice.step is None or slice.step == 1
+
+class NDAccessStringifyMapper:
+    def __init__(self):
+        super().__init__()
+    def map_ndaccessslice(self, expr, enclosing_prec, *args, **kwargs):
+        children = [ str(child) for child in expr._expr]
+        return f'[{", ".join(children)}]'
+    def __call__(self, expr, enclosing_prec, *args, **kwargs) -> Any:
+        return self.map_ndaccessslice(expr, enclosing_prec, *args, **kwargs)
+
+class NDAccessSlice(Expression):
+    def __init__(self, expr) -> None:
+        self._expr = expr
+    def __getinitargs__(self):
+        return (self._expr,)
+
+    def make_stringifier(self):
+        return NDAccessStringifyMapper()
+
+    def is_contiguous(self):
+        is_contiguous = True
+        for item in self._expr[:-1]:
+            rhs = item.step is None and (item.stop == item.start or item.stop == None)
+            is_contiguous = is_contiguous and rhs
+        is_contiguous = is_contiguous and slice_is_contiguous(self._expr[-1])
+        return is_contiguous
+
+    def get_shape(self):
+        # get all shapes for each in self._expr
+        # combine the tuple shapes into one tuple
+        # return the tuple
+        shapes = []
+        found_list = False
+        for item in self._expr:
+            if isinstance(item, list):
+                for listitem in item:
+                    found_list = True
+                    shapes.append(listitem.shape)
+            else:
+                shapes.append(*item.shape)
+        try:
+            assert len(set(shapes)) == 1, "All shapes must be the same"
+        except AssertionError as e:
+            print(f"Warning: Shapes may not be the same. Expected length 1, got length {len(set(shapes))}")
+
+        if found_list:
+          if isinstance(shapes[0], tuple):
+              return tuple([len(shapes), *shapes[0]])
+          return tuple([len(shapes), shapes[0]])
+        return tuple(shapes)
+
+    @property
+    def shape(self):
+        return self.get_shape()
+
+    def __getitem__(self, key):
+        return self._expr[key]
+
+
+    mapper_method = 'map_ndaccessslice'
+
+class TensorFunctorDeclaration(_MultiChildExpression):
+    def __init__(self, name, children):
+        super().__init__(children)
+        self.name = name
+
+    def __getinitargs__(self):
+        return (self.name,) + super().__getinitargs__()
+    mapper_method = 'map_tensor_functor'
+
+    def get_lhs(self):
+        assert self.children
+        return self.children[0]
+    def get_rhs(self):
+        assert self.children
+        return self.children[1]
+
+class TensorFunctorCall(_MultiChildExpression):
+    def __init__(self, name, children):
+        super().__init__(children)
+        self.name = name
+
+    def __getinitargs__(self):
+        return (self.name,) + super().__getinitargs__()
+
+    mapper_method = 'map_tensor_functor_call'
 
 
 class Product(_MultiChildExpression):
@@ -1544,9 +1627,7 @@ class Slice(Expression):
 
     @property
     def stop(self):
-        if len(self.children) == 1:
-            return self.children[0]
-        elif len(self.children) > 1:
+        if len(self.children) > 1:
             return self.children[1]
         else:
             return None
@@ -1558,6 +1639,14 @@ class Slice(Expression):
         else:
             return None
 
+    @property
+    def shape(self):
+        if self.stop is None:
+            return (1,)
+        elif self.step is None or self.step == 0:
+            return (self.stop - self.start,)
+        else:
+            return ((self.stop - self.start) // self.step,)
     mapper_method = intern("map_slice")
 
 

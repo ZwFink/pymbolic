@@ -362,6 +362,9 @@ class CombineMapper(RecursiveMapper):
             self.rec(expr.shiftee, *args, **kwargs),
             self.rec(expr.shift, *args, **kwargs)))
 
+    def map_ndaccessslice(self, expr, *args, **kwargs):
+        return self.combine((self.rec(expr._expr, *args, **kwargs),))
+
     map_right_shift = map_left_shift
 
     def map_bitwise_not(self, expr, *args, **kwargs):
@@ -633,8 +636,8 @@ class IdentityMapper(Mapper):
     def map_substitution(self, expr, *args, **kwargs):
         child = self.rec(expr.child, *args, **kwargs)
         values = tuple([self.rec(v, *args, **kwargs) for v in expr.values])
-        if child is expr.child and all(val is orig_val
-                for val, orig_val in zip(values, expr.values)):
+        if child is expr.child and all([val is orig_val
+                for val, orig_val in zip(values, expr.values)]):
             return expr
 
         return type(expr)(child, expr.variables, values)

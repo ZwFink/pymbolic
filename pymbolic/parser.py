@@ -337,7 +337,7 @@ class Parser:
         rhs = self.parse_tensorfunctorexpr(pstate, ")")
         pstate.expect(_closepar)
         pstate.advance()
-        rhs = primitives.NDAccessSlice(rhs)
+        rhs = primitives.NDAccessSlice(tuple(rhs))
         return primitives.TensorFunctorDeclaration(tf_name, (lhs,rhs))
 
     def parse_tensorfunctorcall(self, pstate):

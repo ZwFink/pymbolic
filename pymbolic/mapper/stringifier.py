@@ -405,6 +405,10 @@ class StringifyMapper(Mapper):
 
     map_max = map_min
 
+    def map_ndaccessslice(self, expr, enclosing_prec, *args, **kwargs):
+        children = [ str(self.rec(child, enclosing_prec, *args, **kwargs)) for child in expr._expr]
+        return f'[{", ".join(children)}]'
+
     def map_derivative(self, expr, enclosing_prec, *args, **kwargs):
         derivs = " ".join(f"d/d{v}" for v in expr.variables)
 

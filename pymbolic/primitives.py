@@ -980,16 +980,12 @@ class Sum(_MultiChildExpression):
     mapper_method = intern("map_sum")
 
 def slice_is_contiguous(slice):
+    if isinstance(slice, NDAccessSlice):
+        slice = slice._expr[0]
+    if isinstance(slice, Variable):
+        return True
     return slice.step is None or slice.step == 1
 
-class NDAccessStringifyMapper:
-    def __init__(self):
-        super().__init__()
-    def map_ndaccessslice(self, expr, enclosing_prec, *args, **kwargs):
-        children = [ str(child) for child in expr._expr]
-        return f'[{", ".join(children)}]'
-    def __call__(self, expr, enclosing_prec, *args, **kwargs) -> Any:
-        return self.map_ndaccessslice(expr, enclosing_prec, *args, **kwargs)
 
 class NDAccessSlice(Expression):
     def __init__(self, expr) -> None:
@@ -997,44 +993,46 @@ class NDAccessSlice(Expression):
     def __getinitargs__(self):
         return (self._expr,)
 
-    def make_stringifier(self):
-        return NDAccessStringifyMapper()
-
     def is_contiguous(self):
         is_contiguous = True
         for item in self._expr[:-1]:
+            if isinstance(item, NDAccessSlice):
+                item = item._expr[0]
             rhs = item.step is None and (item.stop == item.start or item.stop == None)
             is_contiguous = is_contiguous and rhs
         is_contiguous = is_contiguous and slice_is_contiguous(self._expr[-1])
         return is_contiguous
 
-    def get_shape(self):
+    def _get_shape(self):
         # get all shapes for each in self._expr
         # combine the tuple shapes into one tuple
         # return the tuple
         shapes = []
-        found_list = False
         for item in self._expr:
-            if isinstance(item, list):
-                for listitem in item:
-                    found_list = True
-                    shapes.append(listitem.shape)
-            else:
-                shapes.append(*item.shape)
-        try:
-            assert len(set(shapes)) == 1, "All shapes must be the same"
-        except AssertionError as e:
-            print(f"Warning: Shapes may not be the same. Expected length 1, got length {len(set(shapes))}")
-
-        if found_list:
-          if isinstance(shapes[0], tuple):
-              return tuple([len(shapes), *shapes[0]])
-          return tuple([len(shapes), shapes[0]])
+           shapes.append(*item.shape)
         return tuple(shapes)
+
+    def get_shape(self):
+        shapes = []
+        for item in self._expr:
+           shapes.append(item.shape)
+        final_shapes = list()
+        if isinstance(self._expr, tuple):
+            final_shapes = [len(shapes), *shapes[0]]
+        else:
+            for shape in shapes:
+                final_shapes.append(shape[0])
+        return tuple(final_shapes)
+
+    def __iter__(self):
+        return iter(self._expr)
+    def __next__(self):
+        return next(self._expr)
+
 
     @property
     def shape(self):
-        return self.get_shape()
+        return self._get_shape()
 
     def __getitem__(self, key):
         return self._expr[key]
@@ -1642,7 +1640,7 @@ class Slice(Expression):
     @property
     def shape(self):
         if self.stop is None:
-            return (1,)
+            return (self.start,)
         elif self.step is None or self.step == 0:
             return (self.stop - self.start,)
         else:
